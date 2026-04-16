@@ -1,0 +1,83 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Warm editorial palette — cream paper, deep ink */
+    --background: 40 30% 97%;
+    --foreground: 25 20% 15%;
+
+    --card: 0 0% 100%;
+    --card-foreground: 25 20% 15%;
+
+    --muted: 30 15% 94%;
+    --muted-foreground: 25 10% 45%;
+
+    --border: 30 15% 88%;
+    --accent: 18 75% 50%;
+    --accent-foreground: 0 0% 100%;
+
+    /* Category accent colors */
+    --cat-markets: 142 60% 35%;
+    --cat-politics: 358 65% 48%;
+    --cat-global: 215 55% 45%;
+    --cat-sports: 28 85% 50%;
+    --cat-culture: 285 55% 50%;
+
+    /* Market movement */
+    --up: 142 60% 38%;
+    --down: 358 65% 48%;
+  }
+
+  * {
+    border-color: hsl(var(--border));
+  }
+
+  html {
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  body {
+    background-color: hsl(var(--background));
+    color: hsl(var(--foreground));
+    font-family: "Inter", system-ui, sans-serif;
+    font-feature-settings: "ss01", "cv11";
+  }
+
+  /* Subtle paper texture */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    background-image: radial-gradient(
+      circle at 1px 1px,
+      hsl(25 20% 15% / 0.015) 1px,
+      transparent 0
+    );
+    background-size: 24px 24px;
+  }
+
+  #root {
+    position: relative;
+    z-index: 1;
+  }
+}
+
+@layer utilities {
+  .font-display {
+    font-family: "Fraunces", Georgia, serif;
+    font-optical-sizing: auto;
+  }
+
+  .font-mono {
+    font-family: "JetBrains Mono", ui-monospace, monospace;
+  }
+
+  .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
+}
