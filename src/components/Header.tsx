@@ -1,3 +1,5 @@
+import WaterCoolerLogo from "./WaterCoolerLogo";
+
 const WEEKDAYS = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 const MONTHS = [
   "January", "February", "March", "April", "May", "June",
@@ -19,16 +21,16 @@ const Header = () => {
     <header className="border-b border-border bg-background/80 backdrop-blur-sm sticky top-0 z-20">
       <div className="container py-6">
         <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
-          <div>
-            <div className="flex items-baseline gap-3">
+          <div className="flex items-center gap-3">
+            <WaterCoolerLogo className="h-12 w-auto shrink-0 text-foreground" />
+            <div>
               <h1 className="font-display text-4xl sm:text-5xl font-bold tracking-tight leading-none">
                 The Water Cooler
               </h1>
-              <span className="hidden sm:inline-block w-2 h-2 rounded-full bg-accent mb-1.5" aria-hidden />
+              <p className="text-muted-foreground text-sm mt-2 font-medium">
+                Your 5-minute briefing on what matters.
+              </p>
             </div>
-            <p className="text-muted-foreground text-sm mt-2 font-medium">
-              Your 15-minute briefing on what matters.
-            </p>
           </div>
           <div className="text-left sm:text-right shrink-0">
             <p className="font-display text-xl font-semibold leading-tight">{weekday}</p>
