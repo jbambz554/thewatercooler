@@ -21,8 +21,8 @@ const Header = () => {
     <header className="border-b border-border bg-background/80 backdrop-blur-sm sticky top-0 z-20">
       <div className="container py-6">
         <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
-          <div className="flex items-center gap-3">
-            <WaterCoolerLogo className="h-12 w-auto shrink-0 text-foreground" />
+          <div className="flex items-start gap-3">
+            <WaterCoolerLogo className="h-14 w-auto shrink-0 text-foreground -mt-1" />
             <div>
               <h1 className="font-display text-4xl sm:text-5xl font-bold tracking-tight leading-none">
                 The Water Cooler
