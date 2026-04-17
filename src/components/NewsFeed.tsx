@@ -40,7 +40,7 @@ const NewsFeed = ({ category }: NewsFeedProps) => {
       </div>
 
       <div className="bg-card border border-border rounded-xl shadow-card p-6 sm:p-8">
-        {isLoading && stories.length === 0 ? (
+        {isLoading ? (
           <div className="flex items-center justify-center py-12">
             <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
           </div>
@@ -58,7 +58,6 @@ const NewsFeed = ({ category }: NewsFeedProps) => {
                 key={story.id}
                 story={story}
                 isTopStory={idx === 0}
-                rank={idx + 1}
                 category={category}
                 now={now}
               />
