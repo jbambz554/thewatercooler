@@ -20,7 +20,7 @@ const CategoryTabs = ({ activeTab, onTabChange }: CategoryTabsProps) => {
               key={cat.id}
               onClick={() => onTabChange(cat.id)}
               className={`
-                relative py-5 text-base sm:text-lg font-semibold text-center transition-colors
+                relative py-5 font-display text-lg sm:text-xl font-semibold tracking-tight text-center transition-colors
                 border-b-[3px]
                 ${
                   isActive
