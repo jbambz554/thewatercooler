@@ -10,62 +10,91 @@ interface NewsState {
   lastUpdated: number | null;
 }
 
-// Simple in-memory cache across tab switches so we don't refetch every time
 const cache: Partial<Record<CategoryId, { stories: Story[]; fetchedAt: number }>> = {};
 
 export function useNews(category: CategoryId): NewsState & { refetch: () => void } {
   const [state, setState] = useState<NewsState>(() => {
     const cached = cache[category];
-    return {
-      stories: cached?.stories ?? [],
-      isLoading: !cached,
-      error: null,
-      lastUpdated: cached?.fetchedAt ?? null,
-    };
-  });
-
-  const mountedRef = useRef(true);
-
-  const load = async () => {
-    setState((s) => ({ ...s, isLoading: s.stories.length === 0, error: null }));
-    try {
-      const stories = await fetchCategoryNews(category);
-      if (!mountedRef.current) return;
-      cache[category] = { stories, fetchedAt: Date.now() };
-      setState({ stories, isLoading: false, error: null, lastUpdated: Date.now() });
-    } catch (err) {
-      if (!mountedRef.current) return;
-      setState((s) => ({
-        ...s,
-        isLoading: false,
-        error: err instanceof Error ? err.message : "Something went wrong",
-      }));
-    }
-  };
-
-  useEffect(() => {
-    mountedRef.current = true;
-    const cached = cache[category];
-    const isStale = !cached || Date.now() - cached.fetchedAt > NEWS_REFRESH_MS;
-
-    if (isStale) {
-      load();
-    } else {
-      setState({
+    if (cached) {
+      return {
         stories: cached.stories,
         isLoading: false,
         error: null,
         lastUpdated: cached.fetchedAt,
-      });
+      };
     }
+    return { stories: [], isLoading: true, error: null, lastUpdated: null };
+  });
+
+  const mountedRef = useRef(true);
+  const activeCategoryRef = useRef(category);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    activeCategoryRef.current = category;
+
+    const cached = cache[category];
+    const isStale = !cached || Date.now() - cached.fetchedAt > NEWS_REFRESH_MS;
+
+    if (cached) {
+      setState({
+        stories: cached.stories,
+        isLoading: isStale,
+        error: null,
+        lastUpdated: cached.fetchedAt,
+      });
+    } else {
+      setState({ stories: [], isLoading: true, error: null, lastUpdated: null });
+    }
+
+    const load = async () => {
+      const requestedCategory = category;
+      try {
+        const stories = await fetchCategoryNews(requestedCategory);
+        if (!mountedRef.current) return;
+        cache[requestedCategory] = { stories, fetchedAt: Date.now() };
+        if (activeCategoryRef.current !== requestedCategory) return;
+        setState({ stories, isLoading: false, error: null, lastUpdated: Date.now() });
+      } catch (err) {
+        if (!mountedRef.current) return;
+        if (activeCategoryRef.current !== requestedCategory) return;
+        setState((s) => ({
+          ...s,
+          isLoading: false,
+          error: err instanceof Error ? err.message : "Something went wrong",
+        }));
+      }
+    };
+
+    if (isStale) load();
 
     const interval = setInterval(load, NEWS_REFRESH_MS);
     return () => {
       mountedRef.current = false;
       clearInterval(interval);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [category]);
 
-  return { ...state, refetch: load };
+  const refetch = () => {
+    const requestedCategory = category;
+    setState((s) => ({ ...s, isLoading: true, error: null }));
+    fetchCategoryNews(requestedCategory)
+      .then((stories) => {
+        if (!mountedRef.current) return;
+        cache[requestedCategory] = { stories, fetchedAt: Date.now() };
+        if (activeCategoryRef.current !== requestedCategory) return;
+        setState({ stories, isLoading: false, error: null, lastUpdated: Date.now() });
+      })
+      .catch((err) => {
+        if (!mountedRef.current) return;
+        if (activeCategoryRef.current !== requestedCategory) return;
+        setState((s) => ({
+          ...s,
+          isLoading: false,
+          error: err instanceof Error ? err.message : "Something went wrong",
+        }));
+      });
+  };
+
+  return { ...state, refetch };
 }
