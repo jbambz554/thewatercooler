@@ -8,8 +8,11 @@ interface CategoryTabsProps {
 
 const CategoryTabs = ({ activeTab, onTabChange }: CategoryTabsProps) => {
   return (
-    <nav className="border-b border-border" aria-label="Categories">
-      <div className="flex gap-1 overflow-x-auto scrollbar-none -mb-px">
+    <nav
+      className="border-y border-border bg-card/40 w-screen relative left-1/2 -translate-x-1/2"
+      aria-label="Categories"
+    >
+      <div className="grid grid-cols-5">
         {CATEGORIES.map((cat) => {
           const isActive = activeTab === cat.id;
           return (
@@ -17,12 +20,12 @@ const CategoryTabs = ({ activeTab, onTabChange }: CategoryTabsProps) => {
               key={cat.id}
               onClick={() => onTabChange(cat.id)}
               className={`
-                relative px-4 py-3 text-sm font-semibold whitespace-nowrap transition-colors
-                border-b-2 -mb-px
+                relative py-5 text-base sm:text-lg font-semibold text-center transition-colors
+                border-b-[3px]
                 ${
                   isActive
-                    ? "text-foreground"
-                    : "text-muted-foreground border-transparent hover:text-foreground"
+                    ? "text-foreground bg-background"
+                    : "text-muted-foreground border-transparent hover:text-foreground hover:bg-background/50"
                 }
               `}
               style={
