@@ -28,7 +28,7 @@ const Header = () => {
                 The Water Cooler
               </h1>
               <p className="text-muted-foreground text-sm mt-2 font-medium">
-                Your 15-minute briefing on what matters.
+                Your 5-minute briefing on what matters.
               </p>
             </div>
           </div>

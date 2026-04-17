@@ -24,16 +24,13 @@ const FEEDS: Record<CategoryId, { url: string; source: string }[]> = {
     { url: "https://feeds.npr.org/1004/rss.xml", source: "NPR" },
   ],
   sports: [
-    // US major leagues get dedicated feeds (boosted via weights below)
     { url: "https://www.espn.com/espn/rss/nba/news", source: "ESPN NBA" },
     { url: "https://www.espn.com/espn/rss/nfl/news", source: "ESPN NFL" },
     { url: "https://www.espn.com/espn/rss/mlb/news", source: "ESPN MLB" },
     { url: "https://www.espn.com/espn/rss/nhl/news", source: "ESPN NHL" },
-    // International coverage
     { url: "https://feeds.bbci.co.uk/sport/rss.xml", source: "BBC Sport" },
   ],
   culture: [
-    // Celebrity + entertainment — the stories driving the "what's everyone talking about" conversations
     { url: "https://people.com/feed/", source: "People" },
     { url: "https://www.tmz.com/rss.xml", source: "TMZ" },
     { url: "https://variety.com/feed/", source: "Variety" },
@@ -53,15 +50,11 @@ const SOURCE_WEIGHTS: Record<string, number> = {
   "Wall Street Journal": 1.4,
   "Financial Times": 1.4,
   "Politico": 1.3,
-
-  // Sports: US major leagues boosted, international included but deprioritized
   "ESPN NBA": 1.5,
   "ESPN NFL": 1.5,
   "ESPN MLB": 1.5,
   "ESPN NHL": 1.5,
   "BBC Sport": 1.0,
-
-  // Pop culture
   "People": 1.4,
   "TMZ": 1.3,
   "Variety": 1.3,
@@ -70,10 +63,76 @@ const SOURCE_WEIGHTS: Record<string, number> = {
 };
 
 const STORIES_PER_CATEGORY = 5;
-const CACHE_MAX_AGE_SECONDS = 300; // 5 minutes
+const CACHE_MAX_AGE_SECONDS = 300;
 
 // ==========================================================================
-// PARSING & RANKING
+// HTML ENTITY DECODING
+// ==========================================================================
+
+/** Named HTML entities commonly found in RSS feeds. */
+const NAMED_ENTITIES: Record<string, string> = {
+  "&nbsp;": " ",
+  "&amp;": "&",
+  "&quot;": '"',
+  "&apos;": "'",
+  "&lt;": "<",
+  "&gt;": ">",
+  "&ldquo;": "\u201C",
+  "&rdquo;": "\u201D",
+  "&lsquo;": "\u2018",
+  "&rsquo;": "\u2019",
+  "&mdash;": "\u2014",
+  "&ndash;": "\u2013",
+  "&hellip;": "\u2026",
+  "&trade;": "\u2122",
+  "&copy;": "\u00A9",
+  "&reg;": "\u00AE",
+};
+
+/**
+ * Decode HTML entities including numeric ones (&#8217;, &#x2019;).
+ * This is what was missing — the old implementation only handled named
+ * entities, so numeric ones came through as raw text like "&#8216;".
+ */
+function decodeEntities(str: string): string {
+  if (!str || str.indexOf("&") === -1) return str;
+
+  // Numeric decimal: &#123; or &amp;#123; (double-encoded)
+  let out = str.replace(/&(?:amp;)?#(\d+);/g, (_m, dec: string) => {
+    const code = parseInt(dec, 10);
+    return Number.isFinite(code) ? String.fromCodePoint(code) : _m;
+  });
+
+  // Numeric hex: &#x2019; or &amp;#x2019;
+  out = out.replace(/&(?:amp;)?#x([0-9a-fA-F]+);/g, (_m, hex: string) => {
+    const code = parseInt(hex, 16);
+    return Number.isFinite(code) ? String.fromCodePoint(code) : _m;
+  });
+
+  // Named entities
+  out = out.replace(/&[a-zA-Z]+;/g, (m) => NAMED_ENTITIES[m] ?? m);
+
+  return out;
+}
+
+function cleanSummary(html: string, max = 180): string {
+  if (!html) return "";
+  const stripped = decodeEntities(
+    html
+      .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
+      .replace(/<[^>]*>/g, " ")
+  )
+    .replace(/\s+/g, " ")
+    .trim();
+  return stripped.length > max ? stripped.slice(0, max - 1) + "…" : stripped;
+}
+
+function cleanHeadline(text: string): string {
+  return cleanSummary(text, 300);
+}
+
+// ==========================================================================
+// RANKING
 // ==========================================================================
 
 interface Story {
@@ -86,27 +145,6 @@ interface Story {
   score: number;
 }
 
-function cleanSummary(html: string, max = 180): string {
-  if (!html) return "";
-  const stripped = html
-    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
-    .replace(/<[^>]*>/g, " ")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&apos;/g, "'")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/\s+/g, " ")
-    .trim();
-  return stripped.length > max ? stripped.slice(0, max - 1) + "…" : stripped;
-}
-
-function cleanHeadline(text: string): string {
-  return cleanSummary(text, 300);
-}
-
 function scoreStory(publishedAt: string, sourceWeight: number, headline: string): number {
   const now = Date.now();
   const published = new Date(publishedAt).getTime();
@@ -117,6 +155,10 @@ function scoreStory(publishedAt: string, sourceWeight: number, headline: string)
   const lengthFactor = len < 20 ? 0.7 : len > 140 ? 0.8 : len >= 40 && len <= 90 ? 1.05 : 1.0;
   return recency * sourceWeight * lengthFactor;
 }
+
+// ==========================================================================
+// RSS PARSING
+// ==========================================================================
 
 const parser = new XMLParser({
   ignoreAttributes: false,
