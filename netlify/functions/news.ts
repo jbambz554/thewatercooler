@@ -1,10 +1,6 @@
 import type { Handler } from "@netlify/functions";
 import { XMLParser } from "fast-xml-parser";
 
-// ==========================================================================
-// CONFIG — edit these to change your feeds, weights, and ranking behavior
-// ==========================================================================
-
 type CategoryId = "markets" | "politics" | "global" | "sports" | "culture";
 
 const FEEDS: Record<CategoryId, { url: string; source: string }[]> = {
@@ -24,18 +20,24 @@ const FEEDS: Record<CategoryId, { url: string; source: string }[]> = {
     { url: "https://feeds.npr.org/1004/rss.xml", source: "NPR" },
   ],
   sports: [
+    // US major leagues — top priority
     { url: "https://www.espn.com/espn/rss/nba/news", source: "ESPN NBA" },
     { url: "https://www.espn.com/espn/rss/nfl/news", source: "ESPN NFL" },
     { url: "https://www.espn.com/espn/rss/mlb/news", source: "ESPN MLB" },
     { url: "https://www.espn.com/espn/rss/nhl/news", source: "ESPN NHL" },
-    { url: "https://feeds.bbci.co.uk/sport/rss.xml", source: "BBC Sport" },
+    // General US sports coverage
+    { url: "https://www.espn.com/espn/rss/news", source: "ESPN" },
+    // International (kept for variety but deprioritized via weights)
+    { url: "https://feeds.bbci.co.uk/sport/football/rss.xml", source: "BBC Football" },
   ],
   culture: [
-    { url: "https://people.com/feed/", source: "People" },
-    { url: "https://www.tmz.com/rss.xml", source: "TMZ" },
+    // Broad "what's trending" entertainment & internet culture
+    { url: "https://www.vulture.com/rss/index.xml", source: "Vulture" },
     { url: "https://variety.com/feed/", source: "Variety" },
     { url: "https://www.hollywoodreporter.com/feed/", source: "The Hollywood Reporter" },
-    { url: "https://www.vulture.com/rss/index.xml", source: "Vulture" },
+    { url: "https://www.theringer.com/rss/index.xml", source: "The Ringer" },
+    { url: "https://ew.com/feed/", source: "Entertainment Weekly" },
+    { url: "https://www.avclub.com/rss", source: "The A.V. Club" },
   ],
 };
 
@@ -50,24 +52,26 @@ const SOURCE_WEIGHTS: Record<string, number> = {
   "Wall Street Journal": 1.4,
   "Financial Times": 1.4,
   "Politico": 1.3,
+
+  // Sports: American leagues boosted, international gets a modest weight
   "ESPN NBA": 1.5,
   "ESPN NFL": 1.5,
   "ESPN MLB": 1.5,
   "ESPN NHL": 1.5,
-  "BBC Sport": 1.0,
-  "People": 1.4,
-  "TMZ": 1.3,
+  "ESPN": 1.3,
+  "BBC Football": 0.9,
+
+  // Pop culture: prestige outlets lead, tabloids removed
+  "Vulture": 1.4,
   "Variety": 1.3,
   "The Hollywood Reporter": 1.3,
-  "Vulture": 1.2,
+  "The Ringer": 1.3,
+  "Entertainment Weekly": 1.1,
+  "The A.V. Club": 1.1,
 };
 
 const STORIES_PER_CATEGORY = 5;
 const CACHE_MAX_AGE_SECONDS = 300;
-
-// ==========================================================================
-// HTML ENTITY DECODING
-// ==========================================================================
 
 const NAMED_ENTITIES: Record<string, string> = {
   "&nbsp;": " ",
@@ -118,10 +122,6 @@ function cleanHeadline(text: string): string {
   return cleanSummary(text, 300);
 }
 
-// ==========================================================================
-// RANKING
-// ==========================================================================
-
 interface Story {
   id: string;
   headline: string;
@@ -142,10 +142,6 @@ function scoreStory(publishedAt: string, sourceWeight: number, headline: string)
   const lengthFactor = len < 20 ? 0.7 : len > 140 ? 0.8 : len >= 40 && len <= 90 ? 1.05 : 1.0;
   return recency * sourceWeight * lengthFactor;
 }
-
-// ==========================================================================
-// RSS PARSING
-// ==========================================================================
 
 const parser = new XMLParser({
   ignoreAttributes: false,
@@ -279,10 +275,6 @@ async function getCategoryNews(category: CategoryId): Promise<Story[]> {
 
   return deduped.slice(0, STORIES_PER_CATEGORY);
 }
-
-// ==========================================================================
-// HANDLER
-// ==========================================================================
 
 const VALID_CATEGORIES: CategoryId[] = ["markets", "politics", "global", "sports", "culture"];
 
