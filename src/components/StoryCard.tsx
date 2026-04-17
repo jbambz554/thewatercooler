@@ -10,11 +10,14 @@ interface StoryCardProps {
 }
 
 const StoryCard = ({ story, isTopStory, category, now }: StoryCardProps) => {
+  // Some feeds return empty or junk summaries — only render if we have real content
+  const hasSummary = story.summary && story.summary.trim().length > 10;
+
   return (
     <article
       className={`
         group flex gap-4
-        ${isTopStory ? "pb-5 border-b border-border" : "py-1"}
+        ${isTopStory ? "pb-5 border-b border-border" : "py-2"}
       `}
     >
       <span
@@ -43,8 +46,13 @@ const StoryCard = ({ story, isTopStory, category, now }: StoryCardProps) => {
           </h3>
         </a>
 
-        {story.summary && isTopStory && (
-          <p className="text-muted-foreground text-sm leading-relaxed line-clamp-2">
+        {hasSummary && (
+          <p
+            className={`
+              text-muted-foreground leading-relaxed
+              ${isTopStory ? "text-sm line-clamp-3" : "text-sm line-clamp-2"}
+            `}
+          >
             {story.summary}
           </p>
         )}

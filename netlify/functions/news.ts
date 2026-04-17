@@ -1,6 +1,10 @@
 import type { Handler } from "@netlify/functions";
 import { XMLParser } from "fast-xml-parser";
 
+// ==========================================================================
+// CONFIG
+// ==========================================================================
+
 type CategoryId = "markets" | "politics" | "global" | "sports" | "culture";
 
 const FEEDS: Record<CategoryId, { url: string; source: string }[]> = {
@@ -20,28 +24,41 @@ const FEEDS: Record<CategoryId, { url: string; source: string }[]> = {
     { url: "https://feeds.npr.org/1004/rss.xml", source: "NPR" },
   ],
   sports: [
-    // US major leagues — top priority
-    { url: "https://www.espn.com/espn/rss/nba/news", source: "ESPN NBA" },
-    { url: "https://www.espn.com/espn/rss/nfl/news", source: "ESPN NFL" },
-    { url: "https://www.espn.com/espn/rss/mlb/news", source: "ESPN MLB" },
-    { url: "https://www.espn.com/espn/rss/nhl/news", source: "ESPN NHL" },
-    // General US sports coverage
-    { url: "https://www.espn.com/espn/rss/news", source: "ESPN" },
-    // International (kept for variety but deprioritized via weights)
-    { url: "https://feeds.bbci.co.uk/sport/football/rss.xml", source: "BBC Football" },
+    // Yahoo Sports has reliable, well-maintained RSS feeds for each major US league.
+    // (ESPN's feeds work in browsers but can block server-side automated fetchers.)
+    { url: "https://sports.yahoo.com/nba/rss.xml", source: "Yahoo NBA" },
+    { url: "https://sports.yahoo.com/nfl/rss.xml", source: "Yahoo NFL" },
+    { url: "https://sports.yahoo.com/mlb/rss.xml", source: "Yahoo MLB" },
+    { url: "https://sports.yahoo.com/nhl/rss.xml", source: "Yahoo NHL" },
+    // CBS Sports — deep US coverage across all leagues
+    { url: "https://www.cbssports.com/rss/headlines/nba/", source: "CBS Sports NBA" },
+    { url: "https://www.cbssports.com/rss/headlines/nfl/", source: "CBS Sports NFL" },
+    // NYT Sports — national US sports desk
+    { url: "https://rss.nytimes.com/services/xml/rss/nyt/Sports.xml", source: "The New York Times" },
+    // International — lighter presence
+    { url: "https://feeds.bbci.co.uk/sport/rss.xml", source: "BBC Sport" },
   ],
   culture: [
-    // Broad "what's trending" entertainment & internet culture
+    // Trending entertainment & celebrity — TMZ included for the big "people are talking about" stories
+    { url: "https://www.tmz.com/rss.xml", source: "TMZ" },
+    { url: "https://people.com/feed/", source: "People" },
+    // Editorial / criticism / "culture conversation"
     { url: "https://www.vulture.com/rss/index.xml", source: "Vulture" },
     { url: "https://variety.com/feed/", source: "Variety" },
     { url: "https://www.hollywoodreporter.com/feed/", source: "The Hollywood Reporter" },
     { url: "https://www.theringer.com/rss/index.xml", source: "The Ringer" },
+    // Broader "what's trending on the internet" coverage
     { url: "https://ew.com/feed/", source: "Entertainment Weekly" },
-    { url: "https://www.avclub.com/rss", source: "The A.V. Club" },
   ],
 };
 
+/**
+ * Source weights — a loose multiplier on ranking score.
+ * 1.0 is the default baseline; higher means this outlet's stories rank higher,
+ * lower means they're deprioritized but still included.
+ */
 const SOURCE_WEIGHTS: Record<string, number> = {
+  // General news
   "Reuters": 1.5,
   "Associated Press": 1.5,
   "BBC News": 1.4,
@@ -53,25 +70,31 @@ const SOURCE_WEIGHTS: Record<string, number> = {
   "Financial Times": 1.4,
   "Politico": 1.3,
 
-  // Sports: American leagues boosted, international gets a modest weight
-  "ESPN NBA": 1.5,
-  "ESPN NFL": 1.5,
-  "ESPN MLB": 1.5,
-  "ESPN NHL": 1.5,
-  "ESPN": 1.3,
-  "BBC Football": 0.9,
+  // Sports: US leagues prioritized, international still gets a solid weight
+  "Yahoo NBA": 1.5,
+  "Yahoo NFL": 1.5,
+  "Yahoo MLB": 1.5,
+  "Yahoo NHL": 1.5,
+  "CBS Sports NBA": 1.4,
+  "CBS Sports NFL": 1.4,
+  "BBC Sport": 1.0,
 
-  // Pop culture: prestige outlets lead, tabloids removed
+  // Pop culture: editorial outlets lead, TMZ moderate (present but not dominant)
   "Vulture": 1.4,
   "Variety": 1.3,
   "The Hollywood Reporter": 1.3,
   "The Ringer": 1.3,
+  "People": 1.2,
   "Entertainment Weekly": 1.1,
-  "The A.V. Club": 1.1,
+  "TMZ": 1.1,
 };
 
 const STORIES_PER_CATEGORY = 5;
 const CACHE_MAX_AGE_SECONDS = 300;
+
+// ==========================================================================
+// HTML ENTITY DECODING
+// ==========================================================================
 
 const NAMED_ENTITIES: Record<string, string> = {
   "&nbsp;": " ",
@@ -106,7 +129,7 @@ function decodeEntities(str: string): string {
   return out;
 }
 
-function cleanSummary(html: string, max = 180): string {
+function cleanSummary(html: string, max = 220): string {
   if (!html) return "";
   const stripped = decodeEntities(
     html
@@ -121,6 +144,10 @@ function cleanSummary(html: string, max = 180): string {
 function cleanHeadline(text: string): string {
   return cleanSummary(text, 300);
 }
+
+// ==========================================================================
+// RANKING
+// ==========================================================================
 
 interface Story {
   id: string;
@@ -143,6 +170,10 @@ function scoreStory(publishedAt: string, sourceWeight: number, headline: string)
   return recency * sourceWeight * lengthFactor;
 }
 
+// ==========================================================================
+// RSS PARSING
+// ==========================================================================
+
 const parser = new XMLParser({
   ignoreAttributes: false,
   attributeNamePrefix: "@_",
@@ -161,6 +192,7 @@ interface RawItem {
   summary?: string;
   content?: string;
   "content:encoded"?: string;
+  "media:description"?: string;
   __cdata?: string;
 }
 
@@ -204,18 +236,24 @@ async function fetchFeed(url: string, source: string): Promise<Story[]> {
     const sourceWeight = SOURCE_WEIGHTS[source] ?? 1.0;
     const res = await fetch(url, {
       headers: {
-        "User-Agent": "Mozilla/5.0 (compatible; WaterCoolerBot/1.0; +https://thewatercooler.netlify.app)",
+        // Use a realistic browser User-Agent — some feeds block generic bot UAs
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
         "Accept": "application/rss+xml, application/atom+xml, application/xml, text/xml, */*",
       },
       signal: AbortSignal.timeout(8000),
+      redirect: "follow",
     });
     if (!res.ok) {
       console.warn(`Feed ${source} returned ${res.status}`);
       return [];
     }
     const xml = await res.text();
-    const parsed = parser.parse(xml);
+    if (!xml || xml.length < 50) {
+      console.warn(`Feed ${source} returned empty/tiny response`);
+      return [];
+    }
 
+    const parsed = parser.parse(xml);
     const channel = parsed?.rss?.channel;
     const atomFeed = parsed?.feed;
     const rawItems: RawItem[] = channel?.item
@@ -234,7 +272,8 @@ async function fetchFeed(url: string, source: string): Promise<Story[]> {
         extractText(item.description) ||
           extractText(item.summary) ||
           extractText(item["content:encoded"]) ||
-          extractText(item.content)
+          extractText(item.content) ||
+          extractText(item["media:description"])
       );
       const url = extractLink(item);
       const publishedAt =
@@ -264,6 +303,11 @@ async function getCategoryNews(category: CategoryId): Promise<Story[]> {
   const results = await Promise.all(feeds.map((f) => fetchFeed(f.url, f.source)));
   const all = results.flat().filter((s) => s.headline && s.url);
 
+  // Log which feeds contributed so we can debug via Netlify function logs
+  const perSource: Record<string, number> = {};
+  for (const s of all) perSource[s.source] = (perSource[s.source] ?? 0) + 1;
+  console.log(`[${category}] sources:`, perSource);
+
   const seen = new Set<string>();
   const deduped: Story[] = [];
   for (const story of all.sort((a, b) => b.score - a.score)) {
@@ -275,6 +319,10 @@ async function getCategoryNews(category: CategoryId): Promise<Story[]> {
 
   return deduped.slice(0, STORIES_PER_CATEGORY);
 }
+
+// ==========================================================================
+// HANDLER
+// ==========================================================================
 
 const VALID_CATEGORIES: CategoryId[] = ["markets", "politics", "global", "sports", "culture"];
 
