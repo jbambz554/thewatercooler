@@ -5,12 +5,11 @@ import { formatTimeAgo } from "@/lib/format";
 interface StoryCardProps {
   story: Story;
   isTopStory: boolean;
-  rank: number;
   category: CategoryId;
   now: number;
 }
 
-const StoryCard = ({ story, isTopStory, rank, category, now }: StoryCardProps) => {
+const StoryCard = ({ story, isTopStory, category, now }: StoryCardProps) => {
   return (
     <article
       className={`
@@ -18,22 +17,14 @@ const StoryCard = ({ story, isTopStory, rank, category, now }: StoryCardProps) =
         ${isTopStory ? "pb-5 border-b border-border" : "py-1"}
       `}
     >
-      <div className="flex flex-col items-center shrink-0 pt-1">
-        <span
-          className="font-display font-bold text-sm tabular-nums"
-          style={{ color: `hsl(var(--cat-${category}))` }}
-        >
-          {String(rank).padStart(2, "0")}
-        </span>
-        <span
-          className="w-px flex-1 mt-1.5"
-          style={{ backgroundColor: `hsl(var(--cat-${category}) / 0.2)` }}
-          aria-hidden
-        />
-      </div>
+      <span
+        className="w-1 rounded-full shrink-0 self-stretch"
+        style={{ backgroundColor: `hsl(var(--cat-${category}) / 0.35)` }}
+        aria-hidden
+      />
 
       <div className="flex-1 min-w-0 space-y-1.5">
-        <a
+        
           href={story.url}
           target="_blank"
           rel="noopener noreferrer"
