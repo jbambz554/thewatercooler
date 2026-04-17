@@ -1,10 +1,6 @@
 import type { Handler } from "@netlify/functions";
 import { XMLParser } from "fast-xml-parser";
 
-// ==========================================================================
-// CONFIG — edit these to change your feeds, weights, and ranking behavior
-// ==========================================================================
-
 type CategoryId = "markets" | "politics" | "global" | "sports" | "culture";
 
 const FEEDS: Record<CategoryId, { url: string; source: string }[]> = {
@@ -24,14 +20,18 @@ const FEEDS: Record<CategoryId, { url: string; source: string }[]> = {
     { url: "https://feeds.npr.org/1004/rss.xml", source: "NPR" },
   ],
   sports: [
-    { url: "https://www.espn.com/espn/rss/news", source: "ESPN" },
+    { url: "https://www.espn.com/espn/rss/nba/news", source: "ESPN NBA" },
+    { url: "https://www.espn.com/espn/rss/nfl/news", source: "ESPN NFL" },
+    { url: "https://www.espn.com/espn/rss/mlb/news", source: "ESPN MLB" },
+    { url: "https://www.espn.com/espn/rss/nhl/news", source: "ESPN NHL" },
     { url: "https://feeds.bbci.co.uk/sport/rss.xml", source: "BBC Sport" },
-    { url: "https://rss.nytimes.com/services/xml/rss/nyt/Sports.xml", source: "The New York Times" },
   ],
   culture: [
-    { url: "https://www.hollywoodreporter.com/feed/", source: "The Hollywood Reporter" },
+    { url: "https://people.com/feed/", source: "People" },
+    { url: "https://www.tmz.com/rss.xml", source: "TMZ" },
     { url: "https://variety.com/feed/", source: "Variety" },
-    { url: "https://www.theverge.com/rss/index.xml", source: "The Verge" },
+    { url: "https://www.hollywoodreporter.com/feed/", source: "The Hollywood Reporter" },
+    { url: "https://www.vulture.com/rss/index.xml", source: "Vulture" },
   ],
 };
 
@@ -39,26 +39,76 @@ const SOURCE_WEIGHTS: Record<string, number> = {
   "Reuters": 1.5,
   "Associated Press": 1.5,
   "BBC News": 1.4,
-  "BBC Sport": 1.3,
   "NPR": 1.3,
   "The New York Times": 1.4,
   "CNBC": 1.3,
   "Bloomberg": 1.4,
   "Wall Street Journal": 1.4,
   "Financial Times": 1.4,
-  "ESPN": 1.3,
   "Politico": 1.3,
-  "The Hollywood Reporter": 1.2,
-  "Variety": 1.2,
-  "The Verge": 1.1,
+  "ESPN NBA": 1.5,
+  "ESPN NFL": 1.5,
+  "ESPN MLB": 1.5,
+  "ESPN NHL": 1.5,
+  "BBC Sport": 1.0,
+  "People": 1.4,
+  "TMZ": 1.3,
+  "Variety": 1.3,
+  "The Hollywood Reporter": 1.3,
+  "Vulture": 1.2,
 };
 
 const STORIES_PER_CATEGORY = 5;
-const CACHE_MAX_AGE_SECONDS = 300; // 5 minutes
+const CACHE_MAX_AGE_SECONDS = 300;
 
-// ==========================================================================
-// PARSING & RANKING
-// ==========================================================================
+const NAMED_ENTITIES: Record<string, string> = {
+  "&nbsp;": " ",
+  "&amp;": "&",
+  "&quot;": '"',
+  "&apos;": "'",
+  "&lt;": "<",
+  "&gt;": ">",
+  "&ldquo;": "\u201C",
+  "&rdquo;": "\u201D",
+  "&lsquo;": "\u2018",
+  "&rsquo;": "\u2019",
+  "&mdash;": "\u2014",
+  "&ndash;": "\u2013",
+  "&hellip;": "\u2026",
+  "&trade;": "\u2122",
+  "&copy;": "\u00A9",
+  "&reg;": "\u00AE",
+};
+
+function decodeEntities(str: string): string {
+  if (!str || str.indexOf("&") === -1) return str;
+  let out = str.replace(/&(?:amp;)?#(\d+);/g, (_m, dec: string) => {
+    const code = parseInt(dec, 10);
+    return Number.isFinite(code) ? String.fromCodePoint(code) : _m;
+  });
+  out = out.replace(/&(?:amp;)?#x([0-9a-fA-F]+);/g, (_m, hex: string) => {
+    const code = parseInt(hex, 16);
+    return Number.isFinite(code) ? String.fromCodePoint(code) : _m;
+  });
+  out = out.replace(/&[a-zA-Z]+;/g, (m) => NAMED_ENTITIES[m] ?? m);
+  return out;
+}
+
+function cleanSummary(html: string, max = 180): string {
+  if (!html) return "";
+  const stripped = decodeEntities(
+    html
+      .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
+      .replace(/<[^>]*>/g, " ")
+  )
+    .replace(/\s+/g, " ")
+    .trim();
+  return stripped.length > max ? stripped.slice(0, max - 1) + "…" : stripped;
+}
+
+function cleanHeadline(text: string): string {
+  return cleanSummary(text, 300);
+}
 
 interface Story {
   id: string;
@@ -70,33 +120,11 @@ interface Story {
   score: number;
 }
 
-function cleanSummary(html: string, max = 180): string {
-  if (!html) return "";
-  const stripped = html
-    .replace(/<!\[CDATA\[([\s\S]*?)\]\]>/g, "$1")
-    .replace(/<[^>]*>/g, " ")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&apos;/g, "'")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/\s+/g, " ")
-    .trim();
-  return stripped.length > max ? stripped.slice(0, max - 1) + "…" : stripped;
-}
-
-function cleanHeadline(text: string): string {
-  return cleanSummary(text, 300);
-}
-
 function scoreStory(publishedAt: string, sourceWeight: number, headline: string): number {
   const now = Date.now();
   const published = new Date(publishedAt).getTime();
   if (Number.isNaN(published)) return 0;
   const ageHours = Math.max(0, (now - published) / (1000 * 60 * 60));
-  // Recency: ~1.0 for <1h, ~0.3 at 12h, ~0.05 at 24h
   const recency = Math.exp(-ageHours / 8);
   const len = headline.length;
   const lengthFactor = len < 20 ? 0.7 : len > 140 ? 0.8 : len >= 40 && len <= 90 ? 1.05 : 1.0;
@@ -111,7 +139,6 @@ const parser = new XMLParser({
   trimValues: true,
 });
 
-/** Normalize RSS/Atom items into a common shape. */
 interface RawItem {
   title?: string;
   link?: string;
@@ -140,7 +167,6 @@ function extractLink(item: RawItem): string {
   const link = (item as unknown as Record<string, unknown>).link;
   if (typeof link === "string") return link;
   if (Array.isArray(link)) {
-    // Atom: find the "alternate" link or fallback to first
     const alt = link.find(
       (l: unknown) =>
         typeof l === "object" &&
@@ -178,7 +204,6 @@ async function fetchFeed(url: string, source: string): Promise<Story[]> {
     const xml = await res.text();
     const parsed = parser.parse(xml);
 
-    // RSS 2.0: rss.channel.item[], Atom: feed.entry[]
     const channel = parsed?.rss?.channel;
     const atomFeed = parsed?.feed;
     const rawItems: RawItem[] = channel?.item
@@ -227,7 +252,6 @@ async function getCategoryNews(category: CategoryId): Promise<Story[]> {
   const results = await Promise.all(feeds.map((f) => fetchFeed(f.url, f.source)));
   const all = results.flat().filter((s) => s.headline && s.url);
 
-  // Dedupe similar headlines (first 40 chars, lowercased, alphanumeric only)
   const seen = new Set<string>();
   const deduped: Story[] = [];
   for (const story of all.sort((a, b) => b.score - a.score)) {
@@ -239,10 +263,6 @@ async function getCategoryNews(category: CategoryId): Promise<Story[]> {
 
   return deduped.slice(0, STORIES_PER_CATEGORY);
 }
-
-// ==========================================================================
-// HANDLER
-// ==========================================================================
 
 const VALID_CATEGORIES: CategoryId[] = ["markets", "politics", "global", "sports", "culture"];
 
