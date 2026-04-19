@@ -13,17 +13,17 @@ const App = () => {
     <div className="min-h-screen flex flex-col">
       <Header />
 
-      <main className="flex-1 container py-6 sm:py-10">
-        <section className="mb-8" aria-label="Market snapshot">
-          <div className="flex items-baseline justify-between mb-3">
-            <h2 className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">
+      <main className="flex-1 container py-4 sm:py-10">
+        <section className="mb-6 sm:mb-8" aria-label="Market snapshot">
+          <div className="flex items-baseline justify-between mb-2 sm:mb-3">
+            <h2 className="text-[10px] sm:text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">
               Market Snapshot
             </h2>
           </div>
           <MarketStrip />
         </section>
 
-        <div className="mb-6">
+        <div className="mb-4 sm:mb-6">
           <CategoryTabs activeTab={activeTab} onTabChange={setActiveTab} />
         </div>
 
