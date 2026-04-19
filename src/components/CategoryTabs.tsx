@@ -11,6 +11,15 @@ const CATEGORY_ICONS: Record<CategoryId, LucideIcon> = {
   culture: Sparkles,
 };
 
+// Shorter labels for mobile where space is tight
+const MOBILE_LABELS: Record<CategoryId, string> = {
+  markets: "Markets",
+  politics: "Politics",
+  global: "Global",
+  sports: "Sports",
+  culture: "Culture",
+};
+
 interface CategoryTabsProps {
   activeTab: CategoryId;
   onTabChange: (tab: CategoryId) => void;
@@ -31,9 +40,9 @@ const CategoryTabs = ({ activeTab, onTabChange }: CategoryTabsProps) => {
               key={cat.id}
               onClick={() => onTabChange(cat.id)}
               className={`
-                relative py-5 font-display text-lg sm:text-xl font-semibold tracking-tight text-center transition-colors
+                relative py-3 sm:py-5 px-1 font-display text-sm sm:text-xl font-semibold tracking-tight text-center transition-colors
                 border-b-[3px]
-                flex items-center justify-center gap-2.5
+                flex flex-col sm:flex-row items-center justify-center gap-1 sm:gap-2.5
                 ${
                   isActive
                     ? "text-foreground bg-background"
@@ -48,12 +57,13 @@ const CategoryTabs = ({ activeTab, onTabChange }: CategoryTabsProps) => {
               aria-current={isActive ? "page" : undefined}
             >
               <Icon
-                className="w-5 h-5 sm:w-[22px] sm:h-[22px] shrink-0"
+                className="w-4 h-4 sm:w-[22px] sm:h-[22px] shrink-0"
                 style={isActive ? { color: `hsl(var(--cat-${cat.id}))` } : undefined}
                 strokeWidth={1.75}
                 aria-hidden
               />
-              <span>{cat.label}</span>
+              <span className="hidden sm:inline">{cat.label}</span>
+              <span className="sm:hidden text-xs">{MOBILE_LABELS[cat.id]}</span>
             </button>
           );
         })}
