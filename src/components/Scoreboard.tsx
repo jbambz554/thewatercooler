@@ -5,7 +5,6 @@ interface ScoreboardProps {
   active: boolean;
 }
 
-// Small colored pill for each league so scanning is easier
 const LEAGUE_COLORS: Record<string, string> = {
   NBA: "hsl(28 85% 50%)",
   NFL: "hsl(358 65% 48%)",
@@ -47,13 +46,16 @@ function GameCard({ game }: { game: Game }) {
   const isLive = game.state === "in";
 
   return (
-    <div className="flex flex-col gap-1.5 py-3 px-3 sm:px-4 border-r border-b sm:border-b-0 border-border last:border-r-0 min-w-0">
+    <div className="flex flex-col gap-1.5 py-3 px-3 sm:px-4 border-r border-b border-border min-w-0">
       <div className="flex items-center justify-between gap-2">
         <span
-          className="text-[10px] uppercase tracking-wider font-semibold"
+          className="text-[10px] uppercase tracking-wider font-semibold flex items-center gap-1"
           style={{ color: leagueColor }}
         >
           {game.leagueLabel}
+          {game.isPlayoff && (
+            <span className="text-[9px] font-bold opacity-80">• PLAYOFFS</span>
+          )}
         </span>
         <span
           className={`
@@ -77,9 +79,9 @@ const Scoreboard = ({ active }: ScoreboardProps) => {
   if (isLoading && games.length === 0) {
     return (
       <div className="bg-card border border-border rounded-lg shadow-card">
-        <div className="grid grid-cols-2 md:grid-cols-5 divide-x divide-border">
-          {Array.from({ length: 5 }).map((_, i) => (
-            <div key={i} className="py-3 px-4 space-y-2">
+        <div className="grid grid-cols-2 md:grid-cols-4">
+          {Array.from({ length: 8 }).map((_, i) => (
+            <div key={i} className="py-3 px-4 space-y-2 border-r border-b border-border">
               <div className="h-2.5 w-10 bg-muted rounded animate-pulse" />
               <div className="h-4 w-24 bg-muted rounded animate-pulse" />
               <div className="h-4 w-24 bg-muted rounded animate-pulse" />
@@ -100,12 +102,11 @@ const Scoreboard = ({ active }: ScoreboardProps) => {
     );
   }
 
-  // Display up to 5 games across the top row on desktop, 2 per row on mobile
-  const displayed = games.slice(0, 5);
+  const displayed = games.slice(0, 8);
 
   return (
     <div className="bg-card border border-border rounded-lg shadow-card overflow-hidden">
-      <div className="grid grid-cols-2 md:grid-cols-5">
+      <div className="grid grid-cols-2 md:grid-cols-4">
         {displayed.map((game) => (
           <GameCard key={game.id} game={game} />
         ))}
