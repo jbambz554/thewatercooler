@@ -17,7 +17,7 @@ export interface Game {
   startTime: string;
   home: GameTeam;
   away: GameTeam;
-  rank: number;
+  isPlayoff: boolean;
 }
 
 export async function fetchScores(): Promise<Game[]> {
