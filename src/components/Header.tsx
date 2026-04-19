@@ -19,22 +19,22 @@ const Header = () => {
 
   return (
     <header className="border-b border-border bg-background/80 backdrop-blur-sm sticky top-0 z-20">
-      <div className="container py-6">
-        <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-3">
-          <div className="flex items-start gap-3">
-            <WaterCoolerLogo className="h-14 w-auto shrink-0 text-foreground -mt-1" />
+      <div className="container py-4 sm:py-6">
+        <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2 sm:gap-3">
+          <div className="flex items-start gap-2 sm:gap-3">
+            <WaterCoolerLogo className="h-10 sm:h-14 w-auto shrink-0 text-foreground -mt-1" />
             <div>
-              <h1 className="font-display text-4xl sm:text-5xl font-bold tracking-tight leading-none">
+              <h1 className="font-display text-2xl sm:text-5xl font-bold tracking-tight leading-none">
                 The Water Cooler
               </h1>
-              <p className="text-muted-foreground text-sm mt-2 font-medium">
+              <p className="text-muted-foreground text-xs sm:text-sm mt-1.5 sm:mt-2 font-medium">
                 Your 5-minute briefing on what matters.
               </p>
             </div>
           </div>
-          <div className="text-left sm:text-right shrink-0">
-            <p className="font-display text-xl font-semibold leading-tight">{weekday}</p>
-            <p className="text-muted-foreground text-sm font-mono tabular-nums">{date}</p>
+          <div className="text-left sm:text-right shrink-0 flex sm:block items-baseline gap-2">
+            <p className="font-display text-base sm:text-xl font-semibold leading-tight">{weekday}</p>
+            <p className="text-muted-foreground text-xs sm:text-sm font-mono tabular-nums">{date}</p>
           </div>
         </div>
       </div>
