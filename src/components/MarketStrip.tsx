@@ -10,17 +10,17 @@ function QuoteCell({ quote }: { quote: MarketQuote }) {
   const colorClass = isUp ? "text-up" : isDown ? "text-down" : "text-muted-foreground";
 
   return (
-    <div className="flex items-baseline justify-between gap-3 py-3 px-4 border-r border-border last:border-r-0 min-w-0">
+    <div className="flex flex-col sm:flex-row sm:items-baseline sm:justify-between gap-1 sm:gap-3 py-3 px-3 sm:px-4 border-r border-b sm:border-b-0 border-border last:border-r-0 min-w-0">
       <div className="min-w-0">
-        <p className="text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">
+        <p className="text-[10px] sm:text-[11px] uppercase tracking-wider text-muted-foreground font-semibold">
           {quote.label}
         </p>
-        <p className="font-display text-xl font-semibold tabular-nums truncate">
+        <p className="font-display text-base sm:text-xl font-semibold tabular-nums truncate">
           {formatPrice(quote.price)}
         </p>
       </div>
-      <div className={`flex items-center gap-1 text-sm font-mono tabular-nums ${colorClass} shrink-0`}>
-        <Icon className="w-3.5 h-3.5" />
+      <div className={`flex items-center gap-1 text-xs sm:text-sm font-mono tabular-nums ${colorClass} shrink-0`}>
+        <Icon className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
         <span>{formatPercent(quote.changePercent)}</span>
       </div>
     </div>
