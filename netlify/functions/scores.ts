@@ -13,11 +13,12 @@ const LEAGUE_ENDPOINTS: Record<League, string> = {
   nhl: "https://site.api.espn.com/apis/site/v2/sports/hockey/nhl/scoreboard",
 };
 
-const TOTAL_GAMES_CAP = 10; // max games shown across all leagues combined
-const CACHE_MAX_AGE_SECONDS = 60; // live data — short cache
+const TOTAL_GAMES_CAP = 8;
+const NHL_PLAYOFF_CAP = 2;
+const CACHE_MAX_AGE_SECONDS = 60;
 
 // ==========================================================================
-// OUTPUT SHAPE (what the client gets)
+// OUTPUT SHAPE
 // ==========================================================================
 
 interface Team {
@@ -33,11 +34,14 @@ interface Game {
   league: League;
   leagueLabel: string;
   state: "pre" | "in" | "post";
-  statusDetail: string;   // "Final", "Q3 5:23", "8:00 PM ET", etc.
-  startTime: string;      // ISO
+  statusDetail: string;
+  startTime: string;
   home: Team;
   away: Team;
-  rank: number;           // lower = more important for display ordering
+  isPlayoff: boolean;
+  seasonTypeId: number;       // 2 = regular, 3 = postseason
+  liveness: number;           // 0 = live, 1 = upcoming, 2 = finished
+  timeDistance: number;       // abs distance from now in ms (for within-bucket sort)
 }
 
 // ==========================================================================
@@ -50,19 +54,6 @@ const LEAGUE_LABELS: Record<League, string> = {
   mlb: "MLB",
   nhl: "NHL",
 };
-
-/**
- * Score stat competitions so we can sort across leagues:
- *   - live games (state "in") rank highest
- *   - upcoming today rank next
- *   - finished today rank last
- * Within each bucket, closer-in-time games bubble up.
- */
-function rankGame(state: string, startMs: number, nowMs: number): number {
-  const bucket = state === "in" ? 0 : state === "pre" ? 1 : 2;
-  const timeDistance = Math.abs(startMs - nowMs);
-  return bucket * 1_000_000_000 + timeDistance;
-}
 
 interface ESPNCompetitor {
   homeAway: "home" | "away";
@@ -79,6 +70,10 @@ interface ESPNCompetitor {
 interface ESPNEvent {
   id: string;
   date: string;
+  season?: {
+    type?: number;
+    slug?: string;
+  };
   status?: {
     type?: {
       state?: string;
@@ -135,6 +130,15 @@ async function fetchLeague(league: League): Promise<Game[]> {
         const statusDetail = ev.status?.type?.shortDetail ?? "";
         const startMs = new Date(ev.date).getTime();
 
+        // Season type: 2 = regular season, 3 = postseason/playoffs
+        const seasonTypeId = ev.season?.type ?? 2;
+        const isPlayoff =
+          seasonTypeId === 3 ||
+          (ev.season?.slug?.toLowerCase().includes("post") ?? false);
+
+        const liveness = state === "in" ? 0 : state === "pre" ? 1 : 2;
+        const timeDistance = Math.abs(startMs - now);
+
         return {
           id: `${league}-${ev.id}`,
           league,
@@ -144,7 +148,10 @@ async function fetchLeague(league: League): Promise<Game[]> {
           startTime: ev.date,
           home: parseTeam(home),
           away: parseTeam(away),
-          rank: rankGame(state, startMs, now),
+          isPlayoff,
+          seasonTypeId,
+          liveness,
+          timeDistance,
         };
       })
       .filter((g): g is Game => g !== null);
@@ -152,6 +159,65 @@ async function fetchLeague(league: League): Promise<Game[]> {
     console.warn(`Failed to fetch ${league}:`, err);
     return [];
   }
+}
+
+// ==========================================================================
+// PRIORITY / SELECTION LOGIC
+// ==========================================================================
+
+/**
+ * Sort games within a group by liveness then time proximity:
+ *   1) Live games first
+ *   2) Upcoming next (soonest first)
+ *   3) Finished last (most recent first)
+ */
+function byRelevance(a: Game, b: Game): number {
+  if (a.liveness !== b.liveness) return a.liveness - b.liveness;
+  return a.timeDistance - b.timeDistance;
+}
+
+function selectGames(all: Game[]): Game[] {
+  const chosen: Game[] = [];
+  const seen = new Set<string>();
+
+  const add = (g: Game) => {
+    if (seen.has(g.id) || chosen.length >= TOTAL_GAMES_CAP) return;
+    chosen.push(g);
+    seen.add(g.id);
+  };
+
+  // === PRIORITY 1: All NBA playoff games today ===
+  const nbaPlayoffs = all
+    .filter((g) => g.league === "nba" && g.isPlayoff)
+    .sort(byRelevance);
+  nbaPlayoffs.forEach(add);
+
+  // === PRIORITY 2: Up to 2 NHL playoff games ===
+  const nhlPlayoffs = all
+    .filter((g) => g.league === "nhl" && g.isPlayoff)
+    .sort(byRelevance)
+    .slice(0, NHL_PLAYOFF_CAP);
+  nhlPlayoffs.forEach(add);
+
+  // === PRIORITY 3: MLB games (fill remaining) ===
+  const mlb = all.filter((g) => g.league === "mlb").sort(byRelevance);
+  mlb.forEach(add);
+
+  // === FALLBACKS if not enough priority games (off-season, quiet day, etc.) ===
+
+  // Fallback A: any remaining NBA games (regular season)
+  const nbaRest = all.filter((g) => g.league === "nba" && !g.isPlayoff).sort(byRelevance);
+  nbaRest.forEach(add);
+
+  // Fallback B: any remaining NHL games (regular season)
+  const nhlRest = all.filter((g) => g.league === "nhl" && !g.isPlayoff).sort(byRelevance);
+  nhlRest.forEach(add);
+
+  // Fallback C: NFL games (lowest priority since they likely aren't in-season during playoffs)
+  const nfl = all.filter((g) => g.league === "nfl").sort(byRelevance);
+  nfl.forEach(add);
+
+  return chosen;
 }
 
 // ==========================================================================
@@ -163,39 +229,21 @@ export const handler: Handler = async () => {
   const results = await Promise.all(leagues.map(fetchLeague));
   const allGames = results.flat();
 
-  // Count per league for logging
-  const perLeague: Record<string, number> = {};
-  for (const g of allGames) perLeague[g.league] = (perLeague[g.league] ?? 0) + 1;
-  console.log(`Scoreboard pulled ${allGames.length} games:`, perLeague);
-
-  // Sort by rank (live first, then upcoming, then finished)
-  allGames.sort((a, b) => a.rank - b.rank);
-
-  // Try to give each active league at least 1 game if available —
-  // otherwise fill remaining slots with the top-ranked games.
-  const chosen: Game[] = [];
-  const seenIds = new Set<string>();
-
-  // Pass 1: one game per league (top-ranked in each)
-  for (const league of leagues) {
-    const first = allGames.find((g) => g.league === league && !seenIds.has(g.id));
-    if (first) {
-      chosen.push(first);
-      seenIds.add(first.id);
-    }
-  }
-
-  // Pass 2: fill remaining slots by overall rank
+  // Debug logging
+  const stats: Record<string, { total: number; playoff: number; live: number }> = {};
   for (const g of allGames) {
-    if (chosen.length >= TOTAL_GAMES_CAP) break;
-    if (!seenIds.has(g.id)) {
-      chosen.push(g);
-      seenIds.add(g.id);
-    }
+    if (!stats[g.league]) stats[g.league] = { total: 0, playoff: 0, live: 0 };
+    stats[g.league].total++;
+    if (g.isPlayoff) stats[g.league].playoff++;
+    if (g.liveness === 0) stats[g.league].live++;
   }
+  console.log("Scoreboard stats:", JSON.stringify(stats));
 
-  // Final sort so the final list is still in rank order
-  chosen.sort((a, b) => a.rank - b.rank);
+  const chosen = selectGames(allGames);
+  console.log(
+    `Selected ${chosen.length} games:`,
+    chosen.map((g) => `${g.leagueLabel}${g.isPlayoff ? "🏆" : ""} ${g.away.abbr}@${g.home.abbr}`).join(", ")
+  );
 
   return {
     statusCode: 200,
