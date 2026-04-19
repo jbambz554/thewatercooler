@@ -12,6 +12,31 @@ const LEAGUE_COLORS: Record<string, string> = {
   NHL: "hsl(205 40% 40%)",
 };
 
+// Clean up ESPN's verbose status strings for tight mobile cards.
+// Examples of ESPN's shortDetail strings and what we convert them to:
+//   "4/19 - 6:30 PM EDT"   ->  "6:30 PM"         (date is redundant — they're today)
+//   "Q4 10:45"             ->  "Q4 10:45"        (already short)
+//   "Top 6th"              ->  "Top 6th"         (already short)
+//   "Final"                ->  "Final"           (already short)
+//   "End of 3rd Quarter"   ->  "End 3rd"         (compress)
+function cleanStatus(raw: string): string {
+  if (!raw) return "";
+  let s = raw.trim();
+
+  // Strip date prefix like "4/19 - " if present
+  s = s.replace(/^\d{1,2}\/\d{1,2}\s*-\s*/, "");
+  // Strip timezone abbreviation at end ("6:30 PM EDT" -> "6:30 PM")
+  s = s.replace(/\s+(?:EDT|EST|CDT|CST|MDT|MST|PDT|PST|AKDT|AKST|HST|UTC|GMT)\s*$/i, "");
+  // Compress "End of Xth Quarter/Period" -> "End Xth"
+  s = s.replace(/^End of (\d+(?:st|nd|rd|th))\s*(?:Quarter|Period|Inning)?/i, "End $1");
+  // Compress "Xth Quarter" -> "Qx" (NBA/NFL-ish)
+  s = s.replace(/^(\d+)(?:st|nd|rd|th)\s+Quarter/i, "Q$1");
+  // Compress "Xth Period" -> "Px" (NHL)
+  s = s.replace(/^(\d+)(?:st|nd|rd|th)\s+Period/i, "P$1");
+
+  return s;
+}
+
 function TeamRow({ team, state }: { team: GameTeam; state: Game["state"] }) {
   const isFinished = state === "post";
   const isLive = state === "in";
@@ -44,27 +69,30 @@ function TeamRow({ team, state }: { team: GameTeam; state: Game["state"] }) {
 function GameCard({ game }: { game: Game }) {
   const leagueColor = LEAGUE_COLORS[game.leagueLabel] ?? "hsl(25 10% 45%)";
   const isLive = game.state === "in";
+  const statusText = cleanStatus(game.statusDetail);
 
   return (
     <div className="flex flex-col gap-1.5 py-3 px-3 sm:px-4 border-r border-b border-border min-w-0">
-      <div className="flex items-center justify-between gap-2">
+      <div className="flex items-start justify-between gap-2">
         <span
-          className="text-[10px] uppercase tracking-wider font-semibold flex items-center gap-1"
+          className="text-[10px] uppercase tracking-wider font-semibold leading-tight shrink-0"
           style={{ color: leagueColor }}
         >
           {game.leagueLabel}
           {game.isPlayoff && (
-            <span className="text-[9px] font-bold opacity-80">• PLAYOFFS</span>
+            <span className="ml-1 text-[9px] font-bold opacity-80">• PLAYOFFS</span>
           )}
         </span>
         <span
           className={`
-            text-[10px] font-mono tabular-nums truncate
+            text-[10px] font-mono tabular-nums leading-tight text-right min-w-0
             ${isLive ? "text-up font-semibold" : "text-muted-foreground"}
           `}
         >
-          {isLive && <span className="inline-block w-1.5 h-1.5 rounded-full bg-up mr-1 animate-pulse" />}
-          {game.statusDetail}
+          {isLive && (
+            <span className="inline-block w-1.5 h-1.5 rounded-full bg-up mr-1 animate-pulse align-middle" />
+          )}
+          {statusText}
         </span>
       </div>
       <TeamRow team={game.away} state={game.state} />
