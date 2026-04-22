@@ -76,8 +76,14 @@ const CACHE_MAX_AGE_SECONDS = 300;
 const MAX_STORY_AGE_HOURS = 30;
 const MIN_TRUSTWORTHY_AGE_MINUTES = 45;
 
+// AI summarization config
+const AI_MODEL = "claude-haiku-4-5-20251001";
+const AI_MAX_TOKENS = 200;
+const AI_TIMEOUT_MS = 8000;
+const SUMMARY_MAX_CHARS = 400;
+
 // ==========================================================================
-// SUMMARY CLEANING — extract self-contained, useful prose from messy RSS
+// SUMMARY CLEANING (for RSS-derived fallback summaries)
 // ==========================================================================
 
 const NAMED_ENTITIES: Record<string, string> = {
@@ -103,7 +109,6 @@ function decodeEntities(str: string): string {
   return out;
 }
 
-/** Strip HTML + CDATA + entities from raw RSS content, leaving plain text. */
 function stripHtml(raw: string): string {
   if (!raw) return "";
   return decodeEntities(
@@ -118,11 +123,6 @@ function stripHtml(raw: string): string {
     .trim();
 }
 
-/**
- * Remove boilerplate phrases feeds love to attach to descriptions.
- * Ordered most-specific first. Tuned for NYT, WSJ, BBC, NPR, Politico,
- * Variety, Hollywood Reporter, TMZ, People, EW, Vulture.
- */
 function stripBoilerplate(text: string): string {
   let t = text;
   t = t.replace(/\bThe post\s+.+?\s+appeared first on\s+[^.]+\.?\s*$/i, "");
@@ -147,10 +147,6 @@ function splitSentences(text: string): string[] {
   return parts.map((p) => p.trim()).filter((p) => p.length > 0);
 }
 
-/**
- * Pick complete sentences up to a soft character budget. Keeps the last
- * sentence whole rather than truncating mid-word.
- */
 function pickSentences(text: string, maxChars: number): string {
   if (text.length <= maxChars) return text;
   const sentences = splitSentences(text);
@@ -174,7 +170,6 @@ function pickSentences(text: string, maxChars: number): string {
   return out;
 }
 
-/** Is this "summary" actually useful, or is it junk we shouldn't show? */
 function isUsefulSummary(summary: string, headline: string): boolean {
   if (!summary) return false;
   const s = summary.trim();
@@ -186,12 +181,7 @@ function isUsefulSummary(summary: string, headline: string): boolean {
   return true;
 }
 
-/**
- * Produce the best clean summary we can from the various raw RSS fields.
- * Prefers sweet-spot length (80-800 chars) as a proxy for editor-written.
- * Falls back gracefully when fields are missing or junk.
- */
-function buildSummary(
+function buildRssSummary(
   candidates: {
     description?: string;
     summary?: string;
@@ -200,7 +190,7 @@ function buildSummary(
     mediaDescription?: string;
   },
   headline: string,
-  maxChars = 400
+  maxChars = SUMMARY_MAX_CHARS
 ): string {
   const fields = [
     candidates.description,
@@ -240,7 +230,169 @@ function cleanHeadline(text: string): string {
 }
 
 // ==========================================================================
-// TOPIC FINGERPRINTING
+// AI SUMMARY — Claude generates real, self-contained briefing summaries
+// ==========================================================================
+
+const aiSummaryCache = new Map<string, { summary: string; expiresAt: number }>();
+const AI_CACHE_TTL_MS = 60 * 60 * 1000; // 1 hour
+
+function getCachedAiSummary(url: string): string | null {
+  const entry = aiSummaryCache.get(url);
+  if (!entry) return null;
+  if (Date.now() > entry.expiresAt) {
+    aiSummaryCache.delete(url);
+    return null;
+  }
+  return entry.summary;
+}
+
+function setCachedAiSummary(url: string, summary: string): void {
+  aiSummaryCache.set(url, {
+    summary,
+    expiresAt: Date.now() + AI_CACHE_TTL_MS,
+  });
+  if (aiSummaryCache.size > 500) {
+    const entries = Array.from(aiSummaryCache.entries())
+      .sort((a, b) => a[1].expiresAt - b[1].expiresAt)
+      .slice(0, 100);
+    for (const [k] of entries) aiSummaryCache.delete(k);
+  }
+}
+
+interface AnthropicMessage {
+  content?: Array<{ type: string; text?: string }>;
+  stop_reason?: string;
+}
+
+async function generateAiSummary(params: {
+  headline: string;
+  rssSnippet: string;
+  source: string;
+  category: CategoryId;
+  apiKey: string;
+}): Promise<string | null> {
+  const { headline, rssSnippet, source, category, apiKey } = params;
+
+  const systemPrompt = `You write factual, self-contained summaries of news stories for a daily briefing product called The Water Cooler. Each summary must:
+
+- Be EXACTLY 2-3 sentences. Never 1 sentence. Never 4+ sentences.
+- Tell the reader what happened, who is involved, and the key context — enough that they can close the app and hold a conversation about the story.
+- Be purely factual. Do NOT editorialize, speculate, or use marketing language.
+- Do NOT repeat the headline verbatim. The headline is shown separately.
+- Do NOT start with "This article", "The story", "Reports say", etc. Just state the news.
+- Do NOT use words like "delves into", "dives into", "explores", "unpacks".
+- Stay under 400 characters total.
+
+Output only the summary text. No preamble, no markdown, no quotation marks around your output.`;
+
+  const userPrompt = `Category: ${category}
+Source: ${source}
+Headline: ${headline}
+RSS snippet: ${rssSnippet || "(no snippet available)"}
+
+Write the 2-3 sentence summary:`;
+
+  try {
+    const controller = new AbortController();
+    const timeoutHandle = setTimeout(() => controller.abort(), AI_TIMEOUT_MS);
+
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        model: AI_MODEL,
+        max_tokens: AI_MAX_TOKENS,
+        system: systemPrompt,
+        messages: [{ role: "user", content: userPrompt }],
+      }),
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutHandle);
+
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      console.warn(`Claude API returned ${res.status}:`, body.slice(0, 200));
+      return null;
+    }
+
+    const data: AnthropicMessage = await res.json();
+    const textBlock = data.content?.find((b) => b.type === "text");
+    const text = textBlock?.text?.trim();
+    if (!text || text.length < 30) return null;
+
+    const cleaned = text
+      .replace(/^["']|["']$/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (cleaned.length > 500) {
+      return pickSentences(cleaned, SUMMARY_MAX_CHARS);
+    }
+    return cleaned;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.warn(`AI summary generation failed: ${msg}`);
+    return null;
+  }
+}
+
+async function enhanceWithAiSummaries(
+  stories: Story[],
+  category: CategoryId
+): Promise<Story[]> {
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    console.log("No ANTHROPIC_API_KEY set — skipping AI summaries");
+    return stories;
+  }
+
+  const toGenerate: { index: number; story: Story }[] = [];
+  const enhanced = stories.map((s, i) => {
+    const cached = getCachedAiSummary(s.url);
+    if (cached) return { ...s, summary: cached };
+    toGenerate.push({ index: i, story: s });
+    return s;
+  });
+
+  if (toGenerate.length === 0) {
+    console.log(`[${category}] all summaries from cache`);
+    return enhanced;
+  }
+
+  console.log(`[${category}] generating ${toGenerate.length} AI summaries (${stories.length - toGenerate.length} cached)`);
+
+  const results = await Promise.allSettled(
+    toGenerate.map((item) =>
+      generateAiSummary({
+        headline: item.story.headline,
+        rssSnippet: item.story.summary,
+        source: item.story.source,
+        category,
+        apiKey,
+      })
+    )
+  );
+
+  let successes = 0;
+  for (let i = 0; i < results.length; i++) {
+    const result = results[i];
+    const item = toGenerate[i];
+    if (result.status === "fulfilled" && result.value) {
+      enhanced[item.index] = { ...enhanced[item.index], summary: result.value };
+      setCachedAiSummary(item.story.url, result.value);
+      successes++;
+    }
+  }
+
+  console.log(`[${category}] AI summaries: ${successes}/${toGenerate.length} succeeded`);
+  return enhanced;
+}
+
+// ==========================================================================
+// TOPIC FINGERPRINTING (for clustering)
 // ==========================================================================
 
 const STOPWORDS = new Set([
@@ -384,9 +536,6 @@ function clusterAndRank(stories: RawStory[]): Story[] {
     if (!placed) clusters.push([story]);
   }
 
-  // When picking the cluster's representative, prefer stories that ALSO
-  // have a useful summary — a top-ranked story with no summary is a worse
-  // pick than a slightly lower-ranked one that has real content to show.
   const ranked: Story[] = clusters.map((cluster) => {
     const sortedByQuality = [...cluster].sort((a, b) => {
       const aHasSummary = a.summary.length >= 60 ? 1 : 0;
@@ -509,7 +658,7 @@ async function fetchFeed(url: string, source: string): Promise<RawStory[]> {
 
     return rawItems.slice(0, 25).map((item, idx) => {
       const headline = cleanHeadline(extractText(item.title));
-      const summary = buildSummary(
+      const summary = buildRssSummary(
         {
           description: extractText(item.description),
           summary: extractText(item.summary),
@@ -518,7 +667,7 @@ async function fetchFeed(url: string, source: string): Promise<RawStory[]> {
           mediaDescription: extractText(item["media:description"]),
         },
         headline,
-        400
+        SUMMARY_MAX_CHARS
       );
       const url = extractLink(item);
       const publishedAt =
@@ -561,14 +710,15 @@ async function getCategoryNews(category: CategoryId): Promise<Story[]> {
   console.log(`[${category}] sources in window:`, perSource);
 
   const ranked = clusterAndRank(all);
-
   const top = ranked.slice(0, STORIES_PER_CATEGORY);
+
   console.log(
-    `[${category}] top picks:`,
-    top.map((s) => `"${s.headline.slice(0, 40)}..." (${s.corroboratingSources}src, ${s.score.toFixed(2)}, summary=${s.summary.length}chars)`)
+    `[${category}] top picks (pre-AI):`,
+    top.map((s) => `"${s.headline.slice(0, 40)}..." (${s.corroboratingSources}src, ${s.score.toFixed(2)})`)
   );
 
-  return top;
+  const enhanced = await enhanceWithAiSummaries(top, category);
+  return enhanced;
 }
 
 // ==========================================================================
