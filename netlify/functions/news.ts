@@ -72,7 +72,10 @@ const SOURCE_WEIGHTS: Record<string, number> = {
 };
 
 const STORIES_PER_CATEGORY = 5;
-const CACHE_MAX_AGE_SECONDS = 300;
+// Bumped from 300 → 600 so there's a 5-min buffer for warmup jitter.
+// The /warmup function runs every 5 minutes, so CDN cache is refreshed
+// well before expiry.
+const CACHE_MAX_AGE_SECONDS = 600;
 const MAX_STORY_AGE_HOURS = 30;
 const MIN_TRUSTWORTHY_AGE_MINUTES = 45;
 
@@ -306,6 +309,9 @@ Write the 2-3 sentence summary:`;
       body: JSON.stringify({
         model: AI_MODEL,
         max_tokens: AI_MAX_TOKENS,
+        // Lower temperature = more deterministic + slightly faster inference.
+        // For factual summaries we don't need creativity.
+        temperature: 0.3,
         system: systemPrompt,
         messages: [{ role: "user", content: userPrompt }],
       }),
